@@ -84,7 +84,7 @@ def export_formats():
         ['TensorFlow GraphDef', 'pb', '.pb', True],
         ['TensorFlow Lite', 'tflite', '.tflite', False],
         ['TensorFlow Edge TPU', 'edgetpu', '_edgetpu.tflite', False],
-        ['TensorFlow.js', 'tfjs', '_web_model', False],]
+        ['TensorFlow.js', 'tfjs', '_web_model', False], ]
     return pd.DataFrame(x, columns=['Format', 'Argument', 'Suffix', 'GPU'])
 
 
@@ -108,7 +108,8 @@ def export_torchscript(model, im, file, optimize, prefix=colorstr('TorchScript:'
         LOGGER.info(f'{prefix} export failure: {e}')
 
 
-def export_onnx(model, im, file, opset, train, dynamic, simplify, prefix=colorstr('ONNX:')):
+def export_onnx(model, im, file, opset, train, dynamic, simplify, prefix=colorstr('ONNX:')
+                ,disable_detect_postprocess=False):
     # YOLOv5 ONNX export
     try:
         check_requirements(('onnx',))
@@ -126,7 +127,7 @@ def export_onnx(model, im, file, opset, train, dynamic, simplify, prefix=colorst
             training=torch.onnx.TrainingMode.TRAINING if train else torch.onnx.TrainingMode.EVAL,
             do_constant_folding=not train,
             input_names=['images'],
-            output_names=['output'],
+            output_names=['output'] if not disable_detect_postprocess else ['output0','output1','output2'],
             dynamic_axes={
                 'images': {
                     0: 'batch',
@@ -430,9 +431,9 @@ def export_tfjs(keras_model, im, file, prefix=colorstr('TensorFlow.js:')):
                 r'"Identity.?.?": {"name": "Identity.?.?"}, '
                 r'"Identity.?.?": {"name": "Identity.?.?"}, '
                 r'"Identity.?.?": {"name": "Identity.?.?"}}}', r'{"outputs": {"Identity": {"name": "Identity"}, '
-                r'"Identity_1": {"name": "Identity_1"}, '
-                r'"Identity_2": {"name": "Identity_2"}, '
-                r'"Identity_3": {"name": "Identity_3"}}}', json)
+                                                               r'"Identity_1": {"name": "Identity_1"}, '
+                                                               r'"Identity_2": {"name": "Identity_2"}, '
+                                                               r'"Identity_3": {"name": "Identity_3"}}}', json)
             j.write(subst)
 
         LOGGER.info(f'{prefix} export success, saved as {f} ({file_size(f):.1f} MB)')
@@ -494,11 +495,13 @@ def run(
     if half and not (coreml or xml):
         im, model = im.half(), model.half()  # to FP16
     model.train() if train else model.eval()  # training mode = no Detect() layer grid construction
+    disable_detect_postprocess = True
     for k, m in model.named_modules():
         if isinstance(m, Detect):
             m.inplace = inplace
             m.onnx_dynamic = dynamic
             m.export = True
+            m.disable_detect_postprocess = disable_detect_postprocess
 
     for _ in range(2):
         y = model(im)  # dry runs
@@ -513,7 +516,7 @@ def run(
     if engine:  # TensorRT required before ONNX
         f[1] = export_engine(model, im, file, train, half, simplify, workspace, verbose)
     if onnx or xml:  # OpenVINO requires ONNX
-        f[2] = export_onnx(model, im, file, opset, train, dynamic, simplify)
+        f[2] = export_onnx(model, im, file, opset, train, dynamic, simplify, disable_detect_postprocess=True)
     if xml:  # OpenVINO
         f[3] = export_openvino(model, im, file, half)
     if coreml:

@@ -13,6 +13,8 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+import torch
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -38,6 +40,7 @@ class Detect(nn.Module):
     stride = None  # strides computed during build
     onnx_dynamic = False  # ONNX export parameter
     export = False  # export mode
+    disable_detect_postprocess = False
 
     def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super().__init__()
@@ -52,6 +55,12 @@ class Detect(nn.Module):
         self.inplace = inplace  # use in-place ops (e.g. slice assignment)
 
     def forward(self, x):
+        if self.export and self.disable_detect_postprocess:
+            for i in range(self.nl):
+                x[i] = self.m[i](x[i])  # conv
+                x[i] = x[i].sigmoid()
+            return x
+
         z = []  # inference output
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
@@ -322,7 +331,12 @@ if __name__ == '__main__':
 
     # Options
     if opt.line_profile:  # profile layer by layer
-        _ = model(im, profile=True)
+        output = model(im, profile=True)
+        for t in output:
+            if isinstance(t, torch.Tensor):
+                print(t.size())
+            else:
+                print(t)
 
     elif opt.profile:  # profile forward-backward
         results = profile(input=im, ops=[model], n=3)
